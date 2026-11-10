@@ -13,14 +13,17 @@ from fastapi.responses import HTMLResponse
 from psycopg.rows import dict_row
 
 MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", "/media")).resolve()
-DATABASE_URL = os.environ["DATABASE_URL"]
+DB_HOST = os.environ.get("DB_HOST", "db")
+DB_NAME = os.environ.get("DB_NAME", "movana")
+DB_USER = os.environ.get("DB_USER", "movana")
+DB_PASSWORD = os.environ["DB_PASSWORD"]
 VIDEO_EXTENSIONS = {".mkv", ".mp4", ".avi", ".mov", ".m4v", ".wmv", ".ts", ".mpg", ".mpeg", ".webm"}
 state_lock = threading.Lock()
 scan_state = {"running": False, "scanned": 0, "error": None, "finished_at": None}
 
 
 def connection():
-    return psycopg.connect(DATABASE_URL, connect_timeout=5, row_factory=dict_row)
+    return psycopg.connect(host=DB_HOST, dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, connect_timeout=5, row_factory=dict_row)
 
 
 def initialize_database():
