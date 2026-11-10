@@ -1,6 +1,6 @@
 # Movana cross-seed module — design and safety
 
-**Status: candidate size prefilter implemented, no network integration or torrent changes.**
+**Status: size prefilter, offline layout matching and explicit path translation implemented; no indexer or torrent-client integration.**
 
 ## Goal
 
@@ -64,7 +64,7 @@ The current filter is in `app/crossseed/matching.py`. It never hashes, mutates, 
 - `TorrentRegistrationAdapter`: qBittorrent duplicate detection, controlled add/pause/recheck/seed.
 - `JobStore`: durable, resumable operations in PostgreSQL.
 
-Only the pure size matching function exists today. The adapter contracts are deliberately deferred until C411 documentation and the qBittorrent deployment have been checked.
+Pure size filtering (`app/crossseed/matching.py`), file manifest comparison (`app/crossseed/layout.py`) and explicit path mapping (`app/crossseed/paths.py`) exist today. The comparison reports `full`, `partial`, `ambiguous` or `none` but **never marks data as piece-verified**. Path translation does not prove that qBittorrent can actually access the translated path. All client registration, piece checks and seeding remain disabled until validated in a sandbox.
 
 ## Related research
 
