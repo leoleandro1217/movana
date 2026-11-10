@@ -379,7 +379,7 @@ def media(query: str = "", library_id: int | None = None, limit: int = 72, offse
     where = "WHERE " + " AND ".join(criteria)
     with connection() as conn:
         rows = conn.execute(
-            f"SELECT m.id,m.relative_path,m.title,m.category,m.release_year,m.size_bytes,m.library_id,\n                   i.provider_id AS confirmed_tmdb_id, i.original_title AS confirmed_original_title\n            FROM media_files m LEFT JOIN media_identifications i ON i.media_file_id = m.id {where} ORDER BY m.title,m.id LIMIT %s OFFSET %s",
+            f"""SELECT m.id,m.relative_path,m.title,m.category,m.release_year,m.size_bytes,m.library_id,\n                   i.provider_id AS confirmed_tmdb_id, i.original_title AS confirmed_original_title\n            FROM media_files m LEFT JOIN media_identifications i ON i.media_file_id = m.id {where} ORDER BY m.title,m.id LIMIT %s OFFSET %s""",
             args + [limit, offset]).fetchall()
         total = conn.execute(f"SELECT count(*) AS count FROM media_files m {where}", args).fetchone()["count"]
     return {"items": rows, "total": total, "limit": limit, "offset": offset}
