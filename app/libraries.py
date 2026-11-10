@@ -15,6 +15,11 @@ def resolve_library_path(root: Path, supplied: str) -> tuple[str, Path]:
         candidate = requested
     else:
         candidate = root / requested
+    # Absolute paths outside the configured mount are never accepted.
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        raise ValueError("Path must be inside the mounted media directory") from None
     # strict=True prevents missing paths; resolution also catches symlink escapes.
     actual = candidate.resolve(strict=True)
     if actual == root or root not in actual.parents:
