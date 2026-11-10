@@ -16,7 +16,7 @@ The language dropdown obtains locales directly from TMDb's **configuration/prima
 
 **Important distinction:** A locale listed by TMDb is a *supported option*, not proof that a particular movie or episode has that translation. At the per-title level Movana must accept a localized title only when that exact locale's translation record includes a nonempty title. Otherwise the genuine original title is returned. There is no generated or guessed translation. The helper in `app/tmdb_languages.py` enforces this behavior and is covered by offline tests.
 
-Current library tiles continue to show filenames parsed during inventory, because TMDb work identification and retrieval of per-title translations are not implemented yet. Changing the language preference does **not** rename existing files or imply they have been identified.
+Confirmed titles are kept separately from media filenames. The user explicitly selects a TMDb result in the tile's **Find on TMDb** dialog. The app then verifies that ID against TMDb and stores the identity in PostgreSQL. Each tile has a **Details** dialog: for a confirmed identity it fetches title translations, an overview, release date, genres and poster from TMDb, caching the sanitized response in PostgreSQL for 24 hours. A non-confirmed item shows local inventory only. Missing title translations use the actual original title; missing synopsis/art is explicitly labeled unavailable. Changing the language preference does **not** rename files or confirm a work.
 
 ## Setup
 
@@ -33,6 +33,9 @@ Never commit tokens to GitHub. Without a credential, the language list API repor
 - `POST /api/libraries` accepts `metadata_provider`, `title_language`, `title_fallback`.
 - `PATCH /api/libraries/{id}/preferences` saves options on an existing library.
 - `GET /api/libraries` returns these settings for each library.
+- `GET /api/metadata/tmdb/search` lists candidate identities without accepting any match.
+- `POST /api/media/{id}/identify` verifies and persists a manually selected TMDb ID.
+- `GET /api/media/{id}/details` returns local inventory plus a cached, sanitized TMDb profile, when confirmed.
 
 Other providers (OMDb, AniDB, TheTVDB) will be implemented as separate adapters, with their own language capabilities and fallback rules; they must not be presented as supported until functional.
 
@@ -41,3 +44,11 @@ Other providers (OMDb, AniDB, TheTVDB) will be implemented as separate adapters,
 This early alpha has no built-in account authentication; do not expose the HTTP service to untrusted networks. Only an admin on a trusted network should change library preferences. TMDb requests use a finite timeout and a 24-hour in-memory locale cache. Language choices are validated server-side, not just in the browser.
 
 TMDb API data and original titles remain attributed to TMDb under the provider's applicable terms.
+
+## Limits of the current detail view
+
+- No automatic catalog matching, and no file move, rename or torrent registration.
+- File size and path come from the local inventory scan; video/audio codecs, tracks and languages have not been inspected with ffprobe and are labeled **not inspected**.
+- Cross-seed state is labeled **not checked** until that feature has been safely integrated.
+- With `title_language=original`, TMDb is asked for contextual synopsis metadata in `en-US`; this is not necessarily the synopsis's original language. It is not a generated translation.
+- Posters use validated TMDb poster paths from the trusted TMDb image origin, shown only after opening a details dialog.
