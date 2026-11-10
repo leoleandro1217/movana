@@ -57,3 +57,18 @@ def query_candidates(title: str, kind: str, year: int | None = None, page: int =
             "review_required": True,
         })
     return matches
+
+
+def fetch_identity(media_type: str, provider_id: int) -> dict:
+    """Verify user-selected TMDb ID directly with TMDb before confirmation."""
+    if media_type not in ("movie", "tv") or type(provider_id) is not int or provider_id <= 0:
+        raise ValueError("Invalid TMDb identity")
+    data = _request("/" + media_type + "/" + str(provider_id))
+    if not isinstance(data, dict) or data.get("id") != provider_id:
+        raise ProviderUnavailable("TMDb did not confirm the requested identifier")
+    key = "original_title" if media_type == "movie" else "original_name"
+    title = data.get(key)
+    if not isinstance(title, str) or not title.strip():
+        raise ProviderUnavailable("TMDb did not return a real original title")
+    return {"provider": "tmdb", "media_type": media_type,
+            "provider_id": provider_id, "original_title": title.strip()}
