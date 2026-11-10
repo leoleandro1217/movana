@@ -13,7 +13,7 @@ class PathMap:
 
 
 def _absolute(value: str) -> PurePosixPath:
-    if not isinstance(value, str) or not value.startswith("/") or "\\x00" in value or "\\\\" in value:
+    if not isinstance(value, str) or not value.startswith("/") or chr(0) in value or chr(92) in value:
         raise ValueError("Path must be an absolute POSIX path")
     if any(piece in ("", ".", "..") for piece in value[1:].split("/")):
         raise ValueError("Path contains unsafe or ambiguous components")
