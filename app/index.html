@@ -28,7 +28,7 @@ dialog::backdrop{background:#020711b9}
 form{display:flex;flex-direction:column;gap:12px}
 label{font-size:13px;color:#adbed6}form input,form select{width:100%}
 .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
-footer{margin-top:30px;color:#9fb2ca}
+footer{margin-top:30px;color:#9fb2ca}.candidate{padding:12px;border:1px solid #344866;border-radius:10px;margin:9px 0;background:#1a2940}.candidate strong{display:block;margin-bottom:3px}.tile button{margin:0 12px 12px}.candidate-list{max-height:50vh;overflow:auto}.candidate small{color:#a9bdd5}
 @media(max-width:700px){.layout{grid-template-columns:1fr}aside{border:0;border-bottom:1px solid #304057;padding:12px}.logo{padding:4px 0 12px}.nav{flex-direction:row;overflow-x:auto}.nav button{white-space:nowrap}main{padding:16px}}
 </style></head><body><div class="layout">
 <aside><div class="logo">◈ MOVANA</div><div class="small">YOUR LIBRARIES</div>
@@ -60,6 +60,7 @@ footer{margin-top:30px;color:#9fb2ca}
 <p class="small" id="preferences-note">Changing these options does not rename files.</p>
 <div class="actions"><button type="button" class="secondary" id="preferences-cancel">Cancel</button><button type="submit" class="primary">Save preferences</button></div>
 <div class="small" role="alert" id="preferences-error"></div></form></dialog>
+<dialog id="candidate-dialog"><h2>Find on TMDb</h2><p id="candidate-query"></p><p class="small">Candidates only. Nothing is matched, renamed, or moved automatically.</p><div id="candidate-results" class="candidate-list"></div><div class="actions"><button type="button" class="secondary" id="candidate-close">Close</button></div></dialog>
 <script>
 const $=id=>document.getElementById(id);
 let libs=[],selected=null,page=0,total=0,hadActiveScan=false;
@@ -74,12 +75,34 @@ for(const lib of libs){const b=document.createElement('button');b.textContent=(i
 async function refreshLibraries(){const data=await json('/api/libraries');libs=data.items;renderNav();$('scan').disabled=selected===null;$('preferences').disabled=selected===null}
 async function load(){try{const params=new URLSearchParams({query:$('search').value,limit:72,offset:page*72});if(selected!==null)params.set('library_id',selected);const result=await json('/api/media?'+params);total=result.total;$('grid').replaceChildren();
 for(const item of result.items){const tile=document.createElement('article');tile.className='tile';const art=document.createElement('div');art.className='poster';art.textContent=icons[item.category]||'▶';tile.append(art);
-const details=document.createElement('div');details.className='details';addText(details,'div',item.title,'title');addText(details,'div',(item.release_year||'Year unknown')+' · '+(labels[item.category]||item.category)+' · '+(item.size_bytes/1073741824).toFixed(2)+' GiB','meta');addText(details,'div',item.relative_path,'path');tile.append(details);$('grid').append(tile)}
+const details=document.createElement('div');details.className='details';addText(details,'div',item.title,'title');addText(details,'div',(item.release_year||'Year unknown')+' · '+(labels[item.category]||item.category)+' · '+(item.size_bytes/1073741824).toFixed(2)+' GiB','meta');addText(details,'div',item.relative_path,'path');tile.append(details);const find=document.createElement('button');find.className='secondary';find.textContent='Find on TMDb';find.disabled=!['movies','animation','series'].includes(item.category);find.onclick=()=>showCandidates(item);tile.append(find);$('grid').append(tile)}
 $('summary').textContent=total+' files found';$('previous').disabled=page===0;$('next').disabled=(page+1)*72>=total
 }catch(e){$('summary').textContent=e.message}}
 async function status(){try{const s=await json('/api/status');if(s.running){hadActiveScan=true;$('notice').textContent='Scanning '+s.scanned+' media files…';$('scan').disabled=true}
 else{$('scan').disabled=selected===null;$('notice').textContent=s.error?'Scan error: '+s.error:s.finished_at?'Last scan: '+s.scanned+' files processed. Read-only.':'Create a library, then scan its folder.';if(hadActiveScan){hadActiveScan=false;await refreshLibraries();await load()}}}catch(e){$('notice').textContent='Service unavailable: '+e.message}}
 $('scan').onclick=async()=>{if(selected===null)return;try{await json('/api/libraries/'+selected+'/scan',{method:'POST'});hadActiveScan=true;await status()}catch(e){$('notice').textContent=e.message}};
+
+async function showCandidates(item){
+ const dlg=$('candidate-dialog'),results=$('candidate-results');
+ $('candidate-query').textContent=item.title+' ('+(item.release_year||'year unknown')+')';
+ results.textContent='Searching TMDb…';dlg.showModal();
+ try{
+  const params=new URLSearchParams({title:item.title,kind:item.category});
+  // The filename parser's year is a hint, not ground truth. Search
+  // without a hard year filter so ambiguous editions are still visible.
+  const data=await json('/api/metadata/tmdb/search?'+params);
+  results.replaceChildren();
+  if(!data.items.length){results.textContent='No candidates found. Your file is unchanged.';return}
+  for(const match of data.items){
+   const card=document.createElement('div');card.className='candidate';
+   addText(card,'strong',match.original_title);
+   addText(card,'small',(match.release_date||'Date unknown')+' · TMDb #'+match.provider_id+' · Review required');
+   if(match.display_title!==match.original_title)addText(card,'div','TMDb display title: '+match.display_title,'small');
+   results.append(card);
+  }
+ }catch(err){results.textContent='Search unavailable: '+err.message}
+}
+$('candidate-close').onclick=()=>$('candidate-dialog').close();
 
 async function getTmdbLanguages(){
  if(tmdbLocales!==null)return tmdbLocales;
