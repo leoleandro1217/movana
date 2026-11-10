@@ -75,7 +75,7 @@ for(const lib of libs){const b=document.createElement('button');b.textContent=(i
 async function refreshLibraries(){const data=await json('/api/libraries');libs=data.items;renderNav();$('scan').disabled=selected===null;$('preferences').disabled=selected===null}
 async function load(){try{const params=new URLSearchParams({query:$('search').value,limit:72,offset:page*72});if(selected!==null)params.set('library_id',selected);const result=await json('/api/media?'+params);total=result.total;$('grid').replaceChildren();
 for(const item of result.items){const tile=document.createElement('article');tile.className='tile';const art=document.createElement('div');art.className='poster';art.textContent=icons[item.category]||'▶';tile.append(art);
-const details=document.createElement('div');details.className='details';addText(details,'div',item.title,'title');addText(details,'div',(item.release_year||'Year unknown')+' · '+(labels[item.category]||item.category)+' · '+(item.size_bytes/1073741824).toFixed(2)+' GiB','meta');addText(details,'div',item.relative_path,'path');tile.append(details);const find=document.createElement('button');find.className='secondary';find.textContent='Find on TMDb';find.disabled=!['movies','animation','series'].includes(item.category);find.onclick=()=>showCandidates(item);tile.append(find);$('grid').append(tile)}
+const details=document.createElement('div');details.className='details';addText(details,'div',item.confirmed_original_title||item.title,'title');if(item.confirmed_tmdb_id)addText(details,'div','✓ Confirmed TMDb #'+item.confirmed_tmdb_id,'meta');addText(details,'div',(item.release_year||'Year unknown')+' · '+(labels[item.category]||item.category)+' · '+(item.size_bytes/1073741824).toFixed(2)+' GiB','meta');addText(details,'div',item.relative_path,'path');tile.append(details);const find=document.createElement('button');find.className='secondary';find.textContent='Find on TMDb';find.disabled=!['movies','animation','series'].includes(item.category);find.onclick=()=>showCandidates(item);tile.append(find);$('grid').append(tile)}
 $('summary').textContent=total+' files found';$('previous').disabled=page===0;$('next').disabled=(page+1)*72>=total
 }catch(e){$('summary').textContent=e.message}}
 async function status(){try{const s=await json('/api/status');if(s.running){hadActiveScan=true;$('notice').textContent='Scanning '+s.scanned+' media files…';$('scan').disabled=true}
@@ -98,7 +98,17 @@ async function showCandidates(item){
    addText(card,'strong',match.original_title);
    addText(card,'small',(match.release_date||'Date unknown')+' · TMDb #'+match.provider_id+' · Review required');
    if(match.display_title!==match.original_title)addText(card,'div','TMDb display title: '+match.display_title,'small');
-   results.append(card);
+   const confirm=document.createElement('button');
+   confirm.type='button';confirm.className='primary';confirm.textContent='Confirm this identity';
+   confirm.onclick=async()=>{
+     confirm.disabled=true;
+     try{
+       await json('/api/media/'+item.id+'/identify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider_id:match.provider_id})});
+       dlg.close();await load();
+       $('notice').textContent='TMDb identity confirmed in Movana database. No media file was changed.';
+     }catch(err){confirm.disabled=false;results.prepend(document.createTextNode('Confirmation failed: '+err.message+' '))}
+   };
+   card.append(confirm);results.append(card);
   }
  }catch(err){results.textContent='Search unavailable: '+err.message}
 }
