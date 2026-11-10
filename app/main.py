@@ -17,6 +17,7 @@ from app.libraries import TYPES, conflicts, resolve_library_path
 from app.tmdb_languages import ProviderUnavailable, supported_locales, validate_preferences
 from app.tmdb_search import query_candidates, fetch_identity
 from app.search_cache import search_cache_key, CACHE_TTL_HOURS
+from app.tmdb_profile import fetch_profile
 
 MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", "/media")).resolve()
 DB_HOST = os.environ.get("DB_HOST", "db")
@@ -81,6 +82,17 @@ def initialize_database():
                 provider_id INTEGER NOT NULL,
                 original_title TEXT NOT NULL,
                 confirmed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS metadata_profile_cache (
+                media_type VARCHAR(5) NOT NULL CHECK (media_type IN ('movie','tv')),
+                provider_id INTEGER NOT NULL,
+                title_language VARCHAR(16) NOT NULL,
+                profile JSONB NOT NULL,
+                expires_at TIMESTAMPTZ NOT NULL,
+                cached_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (media_type, provider_id, title_language)
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS ix_media_title ON media_files (lower(title))")
@@ -347,6 +359,56 @@ def confirm_identity(media_id: int, request: ManualIdentityChoice):
     if result is None:
         raise HTTPException(status_code=409, detail="Media disappeared or changed category")
     return {"identification": result, "files_modified": False}
+
+
+@app.get("/api/media/{media_id}/details")
+def media_details(media_id: int):
+    """Return local inventory and optional confirmed TMDb profile; never scan media."""
+    with connection() as conn:
+        media = conn.execute("""
+            SELECT m.id, m.relative_path, m.title AS filename_title,
+                   m.category, m.release_year, m.size_bytes, m.modified_ns,
+                   m.observed_at, m.library_id,
+                   COALESCE(l.title_language, 'original') AS title_language,
+                   i.provider_id, i.media_type, i.original_title
+            FROM media_files m
+            LEFT JOIN libraries l ON l.id = m.library_id
+            LEFT JOIN media_identifications i ON i.media_file_id = m.id
+            WHERE m.id = %s
+        """, (media_id,)).fetchone()
+    if media is None:
+        raise HTTPException(status_code=404, detail="Media file not found")
+
+    details = dict(media)
+    media_type, provider_id = details["media_type"], details["provider_id"]
+    if media_type is None or provider_id is None:
+        return {"media": details, "profile": None, "confirmed": False, "cached": False}
+    lang = details["title_language"]
+    with connection() as conn:
+        cached = conn.execute("""
+            SELECT profile FROM metadata_profile_cache
+            WHERE media_type = %s AND provider_id = %s AND title_language = %s
+              AND expires_at > now()
+        """, (media_type, provider_id, lang)).fetchone()
+    if cached:
+        return {"media": details, "profile": cached["profile"], "confirmed": True, "cached": True}
+    try:
+        profile = fetch_profile(media_type, provider_id, lang)
+    except (ProviderUnavailable, ValueError) as exc:
+        # A provider outage must not hide the confirmed identity or local data.
+        return {"media": details, "profile": None, "confirmed": True,
+                "cached": False, "metadata_error": str(exc)}
+    from psycopg.types.json import Jsonb
+    with connection() as conn:
+        conn.execute("""
+            INSERT INTO metadata_profile_cache
+                (media_type, provider_id, title_language, profile, expires_at)
+            VALUES (%s, %s, %s, %s, now() + interval '24 hours')
+            ON CONFLICT (media_type, provider_id, title_language)
+            DO UPDATE SET profile = EXCLUDED.profile,
+                          expires_at = EXCLUDED.expires_at, cached_at = now()
+        """, (media_type, provider_id, lang, Jsonb(profile)))
+    return {"media": details, "profile": profile, "confirmed": True, "cached": False}
 
 
 @app.post("/api/libraries/{library_id}/scan", status_code=202)
