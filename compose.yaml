@@ -23,7 +23,10 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://movana:${DB_PASSWORD:?Set DB_PASSWORD in .env}@db:5432/movana
+      DB_HOST: db
+      DB_NAME: movana
+      DB_USER: movana
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
       MEDIA_ROOT: /media
     ports:
       - "${MOVANA_BIND_IP:-127.0.0.1}:${MOVANA_PORT:-8088}:8080"
