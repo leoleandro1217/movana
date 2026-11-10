@@ -28,7 +28,7 @@ dialog::backdrop{background:#020711b9}
 form{display:flex;flex-direction:column;gap:12px}
 label{font-size:13px;color:#adbed6}form input,form select{width:100%}
 .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
-footer{margin-top:30px;color:#9fb2ca}.candidate{padding:12px;border:1px solid #344866;border-radius:10px;margin:9px 0;background:#1a2940}.candidate strong{display:block;margin-bottom:3px}.tile button{margin:0 12px 12px}.candidate-list{max-height:50vh;overflow:auto}.candidate small{color:#a9bdd5}
+footer{margin-top:30px;color:#9fb2ca}.profile-dialog{width:min(800px,96vw);max-height:90vh;overflow:auto}.profile-layout{display:grid;grid-template-columns:minmax(100px,180px) 1fr;gap:20px;margin-top:16px}.profile-cover{width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:9px;background:#293c63}.profile-info{min-width:0}.profile-info p{line-height:1.55;white-space:pre-wrap}.profile-note{padding:10px;background:#1b2b43;border-radius:9px;color:#b3c7e2;margin-top:10px}@media(max-width:520px){.profile-layout{grid-template-columns:1fr}.profile-cover{max-width:165px}}.candidate{padding:12px;border:1px solid #344866;border-radius:10px;margin:9px 0;background:#1a2940}.candidate strong{display:block;margin-bottom:3px}.tile button{margin:0 12px 12px}.candidate-list{max-height:50vh;overflow:auto}.candidate small{color:#a9bdd5}
 @media(max-width:700px){.layout{grid-template-columns:1fr}aside{border:0;border-bottom:1px solid #304057;padding:12px}.logo{padding:4px 0 12px}.nav{flex-direction:row;overflow-x:auto}.nav button{white-space:nowrap}main{padding:16px}}
 </style></head><body><div class="layout">
 <aside><div class="logo">◈ MOVANA</div><div class="small">YOUR LIBRARIES</div>
@@ -60,6 +60,10 @@ footer{margin-top:30px;color:#9fb2ca}.candidate{padding:12px;border:1px solid #3
 <p class="small" id="preferences-note">Changing these options does not rename files.</p>
 <div class="actions"><button type="button" class="secondary" id="preferences-cancel">Cancel</button><button type="submit" class="primary">Save preferences</button></div>
 <div class="small" role="alert" id="preferences-error"></div></form></dialog>
+<dialog id="detail-dialog" class="profile-dialog" aria-labelledby="detail-heading">
+<h2 id="detail-heading">Media details</h2><div id="detail-content" role="status"></div>
+<div class="actions"><button type="button" class="secondary" id="detail-close">Close</button></div>
+</dialog>
 <dialog id="candidate-dialog"><h2>Find on TMDb</h2><p id="candidate-query"></p><p class="small">Candidates only. Nothing is matched, renamed, or moved automatically.</p><div id="candidate-results" class="candidate-list"></div><div class="actions"><button type="button" class="secondary" id="candidate-close">Close</button></div></dialog>
 <script>
 const $=id=>document.getElementById(id);
@@ -75,12 +79,50 @@ for(const lib of libs){const b=document.createElement('button');b.textContent=(i
 async function refreshLibraries(){const data=await json('/api/libraries');libs=data.items;renderNav();$('scan').disabled=selected===null;$('preferences').disabled=selected===null}
 async function load(){try{const params=new URLSearchParams({query:$('search').value,limit:72,offset:page*72});if(selected!==null)params.set('library_id',selected);const result=await json('/api/media?'+params);total=result.total;$('grid').replaceChildren();
 for(const item of result.items){const tile=document.createElement('article');tile.className='tile';const art=document.createElement('div');art.className='poster';art.textContent=icons[item.category]||'▶';tile.append(art);
-const details=document.createElement('div');details.className='details';addText(details,'div',item.confirmed_original_title||item.title,'title');if(item.confirmed_tmdb_id)addText(details,'div','✓ Confirmed TMDb #'+item.confirmed_tmdb_id,'meta');addText(details,'div',(item.release_year||'Year unknown')+' · '+(labels[item.category]||item.category)+' · '+(item.size_bytes/1073741824).toFixed(2)+' GiB','meta');addText(details,'div',item.relative_path,'path');tile.append(details);const find=document.createElement('button');find.className='secondary';find.textContent='Find on TMDb';find.disabled=!['movies','animation','series'].includes(item.category);find.onclick=()=>showCandidates(item);tile.append(find);$('grid').append(tile)}
+const details=document.createElement('div');details.className='details';addText(details,'div',item.confirmed_original_title||item.title,'title');if(item.confirmed_tmdb_id)addText(details,'div','✓ Confirmed TMDb #'+item.confirmed_tmdb_id,'meta');addText(details,'div',(item.release_year||'Year unknown')+' · '+(labels[item.category]||item.category)+' · '+(item.size_bytes/1073741824).toFixed(2)+' GiB','meta');addText(details,'div',item.relative_path,'path');tile.append(details);const inspect=document.createElement('button');inspect.className='secondary';inspect.textContent='Details';inspect.onclick=()=>showDetails(item.id);tile.append(inspect);const find=document.createElement('button');find.className='secondary';find.textContent='Find on TMDb';find.disabled=!['movies','animation','series'].includes(item.category);find.onclick=()=>showCandidates(item);tile.append(find);$('grid').append(tile)}
 $('summary').textContent=total+' files found';$('previous').disabled=page===0;$('next').disabled=(page+1)*72>=total
 }catch(e){$('summary').textContent=e.message}}
 async function status(){try{const s=await json('/api/status');if(s.running){hadActiveScan=true;$('notice').textContent='Scanning '+s.scanned+' media files…';$('scan').disabled=true}
 else{$('scan').disabled=selected===null;$('notice').textContent=s.error?'Scan error: '+s.error:s.finished_at?'Last scan: '+s.scanned+' files processed. Read-only.':'Create a library, then scan its folder.';if(hadActiveScan){hadActiveScan=false;await refreshLibraries();await load()}}}catch(e){$('notice').textContent='Service unavailable: '+e.message}}
 $('scan').onclick=async()=>{if(selected===null)return;try{await json('/api/libraries/'+selected+'/scan',{method:'POST'});hadActiveScan=true;await status()}catch(e){$('notice').textContent=e.message}};
+
+
+async function showDetails(id){
+ const dlg=$('detail-dialog'),root=$('detail-content');root.textContent='Loading local information…';dlg.showModal();
+ try{
+  const result=await json('/api/media/'+id+'/details');root.replaceChildren();
+  const media=result.media,profile=result.profile;
+  $('detail-heading').textContent=profile?.title||media.original_title||media.filename_title;
+  const layout=document.createElement('div');layout.className='profile-layout';
+  const artwork=document.createElement('div');
+  if(profile?.poster_path){
+    const image=document.createElement('img');image.className='profile-cover';
+    // Poster paths are validated by the backend and served by TMDb.
+    image.src='https://image.tmdb.org/t/p/w342'+profile.poster_path;
+    image.alt='TMDb poster for '+(profile.title||profile.original_title);
+    image.loading='lazy';artwork.append(image);
+  }else{const placeholder=document.createElement('div');placeholder.className='profile-cover poster';placeholder.textContent='▶';artwork.append(placeholder)}
+  layout.append(artwork);
+  const info=document.createElement('div');info.className='profile-info';
+  addText(info,'div',result.confirmed?'✓ Confirmed TMDb #'+media.provider_id:'Unidentified — local inventory only','meta');
+  if(profile){
+    addText(info,'h3',profile.original_title);
+    addText(info,'div',(profile.release_date||'Date unavailable')+(profile.genres?.length?' · '+profile.genres.join(', '):''),'meta');
+    addText(info,'p',profile.overview||'Synopsis unavailable from TMDb.');
+    addText(info,'div','Synopsis locale: '+profile.overview_language+' · Title preference: '+profile.title_language,'small');
+  }else{
+    const message=result.metadata_error?'TMDb is unavailable: '+result.metadata_error:'No TMDb identity has been confirmed for this file.';
+    addText(info,'p',message);
+  }
+  addText(info,'div','Local file: '+media.relative_path,'path');
+  addText(info,'div','Size: '+(media.size_bytes/1073741824).toFixed(2)+' GiB','meta');
+  addText(info,'div','Library category: '+(labels[media.category]||media.category),'meta');
+  addText(info,'div','Video/audio codecs and language tracks: not inspected yet.','profile-note');
+  addText(info,'div','Cross-seed: not checked.','profile-note');
+  layout.append(info);root.append(layout);
+ }catch(err){root.textContent='Could not load details: '+err.message}
+}
+$('detail-close').onclick=()=>$('detail-dialog').close();
 
 async function showCandidates(item){
  const dlg=$('candidate-dialog'),results=$('candidate-results');
