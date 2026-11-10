@@ -140,3 +140,22 @@ flowchart TB
 The source folder must be accessible under the container's read-only media mount. Subfolders are permitted, but library roots may not overlap. This reduces accidental duplicate indexing. A library media type is an organizational preference, **not proof of the file's actual encoding or content**. FFprobe-based inspection and subsequent automated routing will be separate, optional features.
 
 The initial web UI and HTTP API have **no authentication**; only use on a trusted network or behind a properly configured authentication gateway. Do not expose this alpha publicly.
+
+
+## Optional existing-library cross-seed workflow (planned)
+
+```mermaid
+flowchart TD
+    Scan["Existing NAS library inventory"] --> Search["C411/Torznab candidate search"]
+    Search --> Match["Torrent payload structure and piece-hash verification"]
+    Match --> Valid{"Verified compatible?"}
+    Valid -->|No| Reject["Report mismatch; do not add torrent"]
+    Valid -->|Yes| Policy{"Approved / opted-in policy?"}
+    Policy -->|No| Review["Manual review"]
+    Policy -->|Yes| Qbit["Safely register / recheck with qBittorrent"]
+    Qbit --> Confirm{"100% verified, no unwanted download?"}
+    Confirm -->|No| Pause["Pause and flag for review"]
+    Confirm -->|Yes| Seed["Seed permitted content"]
+```
+
+Reuse a proven optional cross-seed adapter rather than claiming that name-based searches prove binary equivalence. This module is not yet implemented and will not run automatically in the first alpha.
