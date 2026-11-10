@@ -120,3 +120,23 @@ This prevents us from conflating a movie, a particular edition, a physical file 
 New providers should implement a documented adapter interface, return normalized results, respect rate limits and support unavailable-provider behavior. New operations must support dry-run, collision checks, durable audit logging, and explicit tests for failure/restart cases.
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md) and [ROADMAP.md](ROADMAP.md).
+
+## User-defined libraries (Alpha 0.1 model)
+
+A **library** is a named navigation section with a content type and one configured, mount-relative source folder (for example `Films 4K` -> `/media/films-4k`). Different libraries can have the same content type. Files are indexed in `media_files` and linked to a `libraries.id` rather than grouped only by guessed filename. The first implementation uses one folder per library; support for multiple roots, route rules and destination settings is planned.
+
+```mermaid
+flowchart TB
+    Admin["Web UI: Add library"] --> Config["Library config: name, kind, source folder"]
+    Config --> Guard{"Within mounted /media, exists, no overlap?"}
+    Guard -->|No| Reject["Reject and explain"]
+    Guard -->|Yes| Store[("PostgreSQL: libraries")]
+    Store --> Select["Sidebar: select library"]
+    Select --> Scan["Read-only recursive scan"]
+    Scan --> Index[("PostgreSQL: media_files + library_id")]
+    Index --> Tiles["Filtered media tile view"]
+```
+
+The source folder must be accessible under the container's read-only media mount. Subfolders are permitted, but library roots may not overlap. This reduces accidental duplicate indexing. A library media type is an organizational preference, **not proof of the file's actual encoding or content**. FFprobe-based inspection and subsequent automated routing will be separate, optional features.
+
+The initial web UI and HTTP API have **no authentication**; only use on a trusted network or behind a properly configured authentication gateway. Do not expose this alpha publicly.
