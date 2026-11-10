@@ -4,7 +4,7 @@
 
 Movana is an open-source, self-hosted media-library manager designed for Docker-compatible NAS and Linux systems.
 
-> **Alpha 0.1 development preview.** Custom read-only media libraries, PostgreSQL persistence, per-library scanning, basic title search and tiled web view. It is not yet tested on a real NAS. No TMDb posters, qBittorrent manipulation, C411 integrations or automatic moves are implemented in this release. An isolated, non-networked cross-seed size prefilter is present for future integration.
+> **Alpha 0.1 development preview.** Custom read-only media libraries, PostgreSQL persistence, per-library scanning, basic title search and tiled web view. It is not yet tested on a real NAS. No TMDb posters, title enrichment, qBittorrent manipulation, C411 integrations or automatic moves are implemented in this release. The development branch adds TMDb title-language preferences per library, without changing filenames. An isolated, non-networked cross-seed size prefilter is present for future integration.
 
 ## Quick start
 
@@ -47,6 +47,7 @@ In the web interface, choose **Add library**, enter its name, category and a pre
 ## Documentation
 - [Architecture and Mermaid diagrams](docs/architecture.md)
 - [Roadmap](docs/ROADMAP.md)
+- [Per-library metadata title languages](docs/METADATA_LANGUAGES.md)
 - [Cross-seed: architecture and safety](docs/CROSS_SEED.md)
 - [Contributing](CONTRIBUTING.md)
 

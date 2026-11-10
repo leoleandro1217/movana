@@ -28,6 +28,8 @@ services:
       DB_USER: movana
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
       MEDIA_ROOT: /media
+      TMDB_READ_ACCESS_TOKEN: ${TMDB_READ_ACCESS_TOKEN:-}
+      TMDB_API_KEY: ${TMDB_API_KEY:-}
     ports:
       - "${MOVANA_BIND_IP:-127.0.0.1}:${MOVANA_PORT:-8088}:8080"
     volumes:
