@@ -56,10 +56,8 @@ def filter_torrent_by_size(
     - Multi-file torrents still require payload mapping and piece verification.
     - Never add a torrent or trigger downloading based on this result alone.
     """
-    if isinstance(candidate.local_video_bytes, bool) or candidate.local_video_bytes < 0:
+    if isinstance(candidate.local_video_bytes, bool) or not isinstance(candidate.local_video_bytes, int) or candidate.local_video_bytes < 0:
         raise ValueError("local_video_bytes must be a nonnegative integer")
-    if not isinstance(candidate.local_video_bytes, int):
-        raise ValueError("local_video_bytes must be an integer")
     if isinstance(max_extra_bytes, bool) or not isinstance(max_extra_bytes, int) or max_extra_bytes < 0:
         raise ValueError("max_extra_bytes must be a nonnegative integer")
     remote = candidate.remote_torrent_bytes
