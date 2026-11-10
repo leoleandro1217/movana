@@ -15,6 +15,7 @@ from psycopg.rows import dict_row
 
 from app.libraries import TYPES, conflicts, resolve_library_path
 from app.tmdb_languages import ProviderUnavailable, supported_locales, validate_preferences
+from app.tmdb_search import query_candidates
 
 MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", "/media")).resolve()
 DB_HOST = os.environ.get("DB_HOST", "db")
@@ -255,6 +256,18 @@ def update_library_preferences(library_id: int, request: LibraryPreferences):
     if row is None:
         raise HTTPException(status_code=404, detail="Library not found")
     return row
+
+
+@app.get("/api/metadata/tmdb/search")
+def metadata_search(title: str, kind: str, year: int | None = None, page: int = 1):
+    """Manual, non-mutating metadata candidate lookup; never accepts a file path."""
+    try:
+        items = query_candidates(title=title, kind=kind, year=year, page=page)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ProviderUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"items": items, "review_required": True}
 
 
 @app.post("/api/libraries/{library_id}/scan", status_code=202)
