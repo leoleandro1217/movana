@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Movana · Your Media, Under Control</title>
+<style>
+:root{color-scheme:dark;font:16px system-ui,sans-serif;background:#0d121c;color:#e8edf8}
+*{box-sizing:border-box}body{margin:0}.shell{max-width:1300px;margin:auto;padding:30px 22px}
+header{display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap}
+h1{margin:0;font-size:32px;letter-spacing:.04em}p{color:#a5b0c4}.tag{font-size:12px;border:1px solid #445269;border-radius:50px;padding:5px 10px;color:#b9c8e1}
+.controls{display:flex;gap:10px;flex-wrap:wrap;margin:28px 0}input,select,button{background:#1a2332;border:1px solid #38455c;color:#f1f5ff;border-radius:10px;padding:11px 14px;font:inherit}
+input{flex:1;min-width:200px}button{cursor:pointer;background:#375bd6;border-color:#5571dd}button:hover{filter:brightness(1.15)}button:disabled{opacity:.5}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:18px}.tile{background:#161e2b;border:1px solid #2e3a4f;border-radius:14px;overflow:hidden;min-width:0}
+.poster{aspect-ratio:2/3;background:linear-gradient(145deg,#2c4363,#172233 65%,#31273d);display:flex;align-items:center;justify-content:center;color:#a7b8cd;font-size:42px}
+.info{padding:12px}.name{font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.meta{margin-top:6px;font-size:12px;color:#a6b5c9}.filename{font-size:11px;color:#7f93b2;overflow-wrap:anywhere;margin-top:9px}
+footer{margin-top:30px;color:#93a7be;font-size:13px}.notice{padding:14px;border:1px solid #34445d;background:#172236;border-radius:10px}
+</style></head><body><main class="shell">
+<header><div><h1>◈ MOVANA</h1><p>Your media. Organized. Evolved.</p></div><span class="tag">ALPHA 0.1 · READ ONLY</span></header>
+<div class="notice" id="notice">Choose a media folder in your Docker configuration, then start a read-only scan. Posters and metadata integrations come later.</div>
+<div class="controls"><input id="search" aria-label="Search media" placeholder="Search titles…"><select id="category" aria-label="Media type"><option value="all">All media</option><option value="movies">Movies</option><option value="series">Series</option><option value="anime">Anime</option></select><button id="scan">Scan library</button></div>
+<div id="summary" role="status">Loading…</div><section class="grid" id="grid" aria-label="Media library"></section>
+<footer><button id="previous" disabled>Previous</button> <button id="next" disabled>Next</button> · Movana inventories files without renaming, moving or deleting anything.</footer>
+</main><script>
+const $=id=>document.getElementById(id);let page=0,total=0;const pageSize=72;
+function text(parent,tag,value,cls){const e=document.createElement(tag);if(cls)e.className=cls;e.textContent=value;parent.append(e)}
+async function load(){
+ try{
+ const params=new URLSearchParams({query:$('search').value,category:$('category').value,limit:pageSize,offset:page*pageSize});
+ const response=await fetch('/api/media?'+params);if(!response.ok)throw Error('Database not ready');
+ const result=await response.json();total=result.total;$('grid').replaceChildren();
+ for(const item of result.items){const tile=document.createElement('article');tile.className='tile';const poster=document.createElement('div');poster.className='poster';poster.textContent=item.category==='anime'?'✦':item.category==='series'?'▣':'▶';tile.append(poster);
+ const info=document.createElement('div');info.className='info';text(info,'div',item.title,'name');text(info,'div',(item.release_year||'Year unknown')+' · '+item.category+' · '+(item.size_bytes/1073741824).toFixed(2)+' GiB','meta');text(info,'div',item.relative_path,'filename');tile.append(info);$('grid').append(tile)}
+ $('summary').textContent=total+' files indexed';$('previous').disabled=page===0;$('next').disabled=(page+1)*pageSize>=total
+ }catch(err){$('summary').textContent='Database unavailable — retry in a moment'}
+}
+async function updateStatus(){try{const r=await fetch('/api/status');const s=await r.json();$('scan').disabled=s.running;$('notice').textContent=s.running?'Scanning… '+s.scanned+' files processed':s.error?'Last scan error: '+s.error:s.finished_at?'Last scan completed: '+s.scanned+' files processed. Read-only.':'Choose a media folder in Docker configuration, then scan.';if(!s.running&&s.finished_at)await load()}catch{}}
+$('scan').onclick=async()=>{try{const r=await fetch('/api/scan',{method:'POST'});if(!r.ok)throw Error(await r.text());await updateStatus()}catch(e){$('notice').textContent=e.message}};
+$('search').oninput=()=>{page=0;load()};$('category').onchange=()=>{page=0;load()};
+$('previous').onclick=()=>{page--;load()};$('next').onclick=()=>{page++;load()};
+load();updateStatus();setInterval(updateStatus,4000);
+</script></body></html>
