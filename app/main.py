@@ -16,6 +16,7 @@ from psycopg.rows import dict_row
 from app.libraries import TYPES, conflicts, resolve_library_path
 from app.tmdb_languages import ProviderUnavailable, supported_locales, validate_preferences
 from app.tmdb_search import query_candidates
+from app.search_cache import search_cache_key, CACHE_TTL_HOURS
 
 MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", "/media")).resolve()
 DB_HOST = os.environ.get("DB_HOST", "db")
@@ -64,6 +65,14 @@ def initialize_database():
         conn.execute("ALTER TABLE libraries ADD COLUMN IF NOT EXISTS metadata_provider TEXT NOT NULL DEFAULT 'tmdb'")
         conn.execute("ALTER TABLE libraries ADD COLUMN IF NOT EXISTS title_language TEXT NOT NULL DEFAULT 'original'")
         conn.execute("ALTER TABLE libraries ADD COLUMN IF NOT EXISTS title_fallback TEXT NOT NULL DEFAULT 'original'")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS metadata_search_cache (
+                cache_key CHAR(64) PRIMARY KEY,
+                results JSONB NOT NULL,
+                expires_at TIMESTAMPTZ NOT NULL,
+                cached_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """)
         conn.execute("CREATE INDEX IF NOT EXISTS ix_media_title ON media_files (lower(title))")
         conn.execute("CREATE INDEX IF NOT EXISTS ix_media_library ON media_files (library_id)")
 
@@ -261,13 +270,35 @@ def update_library_preferences(library_id: int, request: LibraryPreferences):
 @app.get("/api/metadata/tmdb/search")
 def metadata_search(title: str, kind: str, year: int | None = None, page: int = 1):
     """Manual, non-mutating metadata candidate lookup; never accepts a file path."""
+    # Validate arguments before touching the cache, even for cached queries.
+    title = title.strip()
+    if not title or len(title) > 200 or kind not in ("movies", "animation", "series", "anime") or not 1 <= page <= 5:
+        raise HTTPException(status_code=422, detail="Invalid search title, kind or page")
+    if year is not None and not 1870 <= year <= 2100:
+        raise HTTPException(status_code=422, detail="Invalid release year")
+    key = search_cache_key(title, kind, year, page)
+    with connection() as conn:
+        hit = conn.execute("""
+            SELECT results FROM metadata_search_cache
+            WHERE cache_key = %s AND expires_at > now()
+        """, (key,)).fetchone()
+    if hit is not None:
+        return {"items": hit["results"], "review_required": True, "cached": True}
     try:
         items = query_candidates(title=title, kind=kind, year=year, page=page)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ProviderUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return {"items": items, "review_required": True}
+    from psycopg.types.json import Jsonb
+    with connection() as conn:
+        conn.execute("""
+            INSERT INTO metadata_search_cache (cache_key, results, expires_at)
+            VALUES (%s, %s, now() + (%s * interval '1 hour'))
+            ON CONFLICT (cache_key) DO UPDATE SET
+                results = EXCLUDED.results, expires_at = EXCLUDED.expires_at, cached_at = now()
+        """, (key, Jsonb(items), CACHE_TTL_HOURS))
+    return {"items": items, "review_required": True, "cached": False}
 
 
 @app.post("/api/libraries/{library_id}/scan", status_code=202)
