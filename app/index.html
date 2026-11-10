@@ -37,7 +37,7 @@ footer{margin-top:30px;color:#9fb2ca}
 <p class="small">Alpha 0.1 · Read-only media inventory</p></aside>
 <main><header><h1 id="heading">All media</h1><p id="description">Media overview across all configured libraries</p></header>
 <div class="notice" id="notice" role="status">Loading libraries…</div>
-<div class="controls"><input id="search" placeholder="Search your media…" aria-label="Search titles">
+<div class="controls"><button class="secondary" id="preferences" disabled>⚙ Library settings</button><input id="search" placeholder="Search your media…" aria-label="Search titles">
 <button class="primary" id="scan">Scan selected library</button></div>
 <div id="summary" class="small" style="margin-bottom:15px">Loading…</div><section class="grid" id="grid" aria-label="Media library"></section>
 <footer><button class="secondary" id="previous" disabled>Previous</button> <button class="secondary" id="next" disabled>Next</button> · No file modifications.</footer></main>
@@ -46,20 +46,32 @@ footer{margin-top:30px;color:#9fb2ca}
 <form id="create-form"><label>Name<input id="library-name" maxlength="100" required placeholder="Films 4K"></label>
 <label>Content type<select id="library-kind"><option value="movies">Movies</option><option value="series">TV series</option><option value="anime">Japanese anime</option><option value="animation">Animated feature films</option><option value="mixed">Mixed</option></select></label>
 <label>Folder inside /media<input id="library-folder" required placeholder="films-4k"></label>
+<label>Metadata provider<select id="library-provider"><option value="tmdb">TMDb</option></select></label>
+<label>Title language<select id="library-language"><option value="original">Original title</option></select></label>
+<label>When a translation is missing<select id="library-fallback"><option value="original">Use original title</option></select></label>
 <p class="small">Example: films-4k refers to /media/films-4k. The folder must already exist and be mounted.</p>
 <div class="actions"><button class="secondary" type="button" id="cancel">Cancel</button><button class="primary" type="submit">Create</button></div>
 <div id="form-error" role="alert" class="small"></div></form></dialog>
+<dialog id="preferences-dialog"><h2>Library metadata</h2><p id="preferences-name"></p>
+<form id="preferences-form">
+<label>Metadata provider<select id="preferences-provider"><option value="tmdb">TMDb</option></select></label>
+<label>Title language<select id="preferences-language"><option value="original">Original title</option></select></label>
+<label>Missing translations<select id="preferences-fallback"><option value="original">Use original title</option></select></label>
+<p class="small" id="preferences-note">Changing these options does not rename files.</p>
+<div class="actions"><button type="button" class="secondary" id="preferences-cancel">Cancel</button><button type="submit" class="primary">Save preferences</button></div>
+<div class="small" role="alert" id="preferences-error"></div></form></dialog>
 <script>
 const $=id=>document.getElementById(id);
 let libs=[],selected=null,page=0,total=0,hadActiveScan=false;
+let tmdbLocales=null;
 const labels={movies:'Movies',series:'TV series',anime:'Anime',animation:'Animation',mixed:'Mixed'};
 const icons={movies:'▶',series:'▣',anime:'✦',animation:'★',mixed:'▦'};
 function addText(element,tag,value,cls){const el=document.createElement(tag);if(cls)el.className=cls;el.textContent=value;element.append(el)}
 async function json(url,options){const response=await fetch(url,options);const data=await response.json();if(!response.ok)throw Error(typeof data.detail==='string'?data.detail:'Request failed');return data}
-function choose(id){selected=id;page=0;const lib=libs.find(x=>x.id===id);$('heading').textContent=lib?lib.name:'All media';$('description').textContent=lib?(labels[lib.kind]+' · /media/'+lib.folder):'Media overview across all configured libraries';$('scan').disabled=!lib;renderNav();load()}
+function choose(id){selected=id;page=0;$('preferences').disabled=id===null;const lib=libs.find(x=>x.id===id);$('heading').textContent=lib?lib.name:'All media';$('description').textContent=lib?(labels[lib.kind]+' · /media/'+lib.folder):'Media overview across all configured libraries';$('scan').disabled=!lib;renderNav();load()}
 function renderNav(){const nav=$('libraries');nav.replaceChildren();const all=document.createElement('button');all.textContent='▦ All media';all.className=selected===null?'active':'';all.onclick=()=>choose(null);nav.append(all);
 for(const lib of libs){const b=document.createElement('button');b.textContent=(icons[lib.kind]||'▣')+' '+lib.name+' ('+lib.file_count+')';b.className=selected===lib.id?'active':'';b.onclick=()=>choose(lib.id);nav.append(b)}}
-async function refreshLibraries(){const data=await json('/api/libraries');libs=data.items;renderNav();$('scan').disabled=selected===null}
+async function refreshLibraries(){const data=await json('/api/libraries');libs=data.items;renderNav();$('scan').disabled=selected===null;$('preferences').disabled=selected===null}
 async function load(){try{const params=new URLSearchParams({query:$('search').value,limit:72,offset:page*72});if(selected!==null)params.set('library_id',selected);const result=await json('/api/media?'+params);total=result.total;$('grid').replaceChildren();
 for(const item of result.items){const tile=document.createElement('article');tile.className='tile';const art=document.createElement('div');art.className='poster';art.textContent=icons[item.category]||'▶';tile.append(art);
 const details=document.createElement('div');details.className='details';addText(details,'div',item.title,'title');addText(details,'div',(item.release_year||'Year unknown')+' · '+(labels[item.category]||item.category)+' · '+(item.size_bytes/1073741824).toFixed(2)+' GiB','meta');addText(details,'div',item.relative_path,'path');tile.append(details);$('grid').append(tile)}
@@ -68,8 +80,54 @@ $('summary').textContent=total+' files found';$('previous').disabled=page===0;$(
 async function status(){try{const s=await json('/api/status');if(s.running){hadActiveScan=true;$('notice').textContent='Scanning '+s.scanned+' media files…';$('scan').disabled=true}
 else{$('scan').disabled=selected===null;$('notice').textContent=s.error?'Scan error: '+s.error:s.finished_at?'Last scan: '+s.scanned+' files processed. Read-only.':'Create a library, then scan its folder.';if(hadActiveScan){hadActiveScan=false;await refreshLibraries();await load()}}}catch(e){$('notice').textContent='Service unavailable: '+e.message}}
 $('scan').onclick=async()=>{if(selected===null)return;try{await json('/api/libraries/'+selected+'/scan',{method:'POST'});hadActiveScan=true;await status()}catch(e){$('notice').textContent=e.message}};
-$('new-library').onclick=()=>$('create-dialog').showModal();$('cancel').onclick=()=>$('create-dialog').close();
-$('create-form').onsubmit=async e=>{e.preventDefault();$('form-error').textContent='';try{const lib=await json('/api/libraries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('library-name').value,kind:$('library-kind').value,folder:$('library-folder').value})});$('create-dialog').close();$('create-form').reset();await refreshLibraries();choose(lib.id);await status()}catch(err){$('form-error').textContent=err.message}};
+
+async function getTmdbLanguages(){
+ if(tmdbLocales!==null)return tmdbLocales;
+ try{
+   const r=await json('/api/providers/tmdb/languages');
+   tmdbLocales=r.languages.filter(x=>x!=='original');
+   return tmdbLocales;
+ }catch(e){return null}
+}
+function renderLanguageOptions(element,locales,current){
+ element.replaceChildren();
+ const origin=document.createElement('option');origin.value='original';origin.textContent='Original title';element.append(origin);
+ if(locales)for(const lang of locales){const option=document.createElement('option');option.value=lang;option.textContent=lang;element.append(option)}
+ if(current!=='original' && (!locales || !locales.includes(current))){
+   const existing=document.createElement('option');existing.value=current;existing.textContent=current+' (saved; currently unverified)';element.append(existing);
+ }
+ element.value=current;
+}
+$('new-library').onclick=async()=>{
+ $('create-dialog').showModal();
+ const locales=await getTmdbLanguages();
+ renderLanguageOptions($('library-language'),locales,'original');
+};
+$('preferences').onclick=async()=>{
+ const lib=libs.find(x=>x.id===selected);if(!lib)return;
+ $('preferences-name').textContent=lib.name;
+ $('preferences-error').textContent='';
+ $('preferences-dialog').showModal();
+ const locales=await getTmdbLanguages();
+ renderLanguageOptions($('preferences-language'),locales,lib.title_language||'original');
+ $('preferences-note').textContent=locales?'Available languages are provided by TMDb; individual movies may not have translations.':'TMDb languages unavailable. Original title remains available; changes to other languages require provider verification.';
+};
+$('preferences-cancel').onclick=()=>$('preferences-dialog').close();
+$('preferences-form').onsubmit=async e=>{
+ e.preventDefault();if(selected===null)return;
+ $('preferences-error').textContent='';
+ try{
+  await json('/api/libraries/'+selected+'/preferences',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+   metadata_provider:$('preferences-provider').value,
+   title_language:$('preferences-language').value,
+   title_fallback:$('preferences-fallback').value
+  })});
+  $('preferences-dialog').close();await refreshLibraries();
+  $('notice').textContent='Preferences saved. Changes affect future metadata display, not filenames.';
+ }catch(error){$('preferences-error').textContent=error.message}
+};
+$('cancel').onclick=()=>$('create-dialog').close();
+$('create-form').onsubmit=async e=>{e.preventDefault();$('form-error').textContent='';try{const lib=await json('/api/libraries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('library-name').value,kind:$('library-kind').value,folder:$('library-folder').value,metadata_provider:$('library-provider').value,title_language:$('library-language').value,title_fallback:$('library-fallback').value})});$('create-dialog').close();$('create-form').reset();await refreshLibraries();choose(lib.id);await status()}catch(err){$('form-error').textContent=err.message}};
 $('search').oninput=()=>{page=0;load()};$('previous').onclick=()=>{page--;load()};$('next').onclick=()=>{page++;load()};
 Promise.all([refreshLibraries(),load()]).then(status).catch(e=>$('notice').textContent=e.message);setInterval(status,5000);
 </script></body></html>
