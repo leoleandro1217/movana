@@ -52,3 +52,13 @@ TMDb API data and original titles remain attributed to TMDb under the provider's
 - Cross-seed state is labeled **not checked** until that feature has been safely integrated.
 - With `title_language=original`, TMDb is asked for contextual synopsis metadata in `en-US`; this is not necessarily the synopsis's original language. It is not a generated translation.
 - Posters use validated TMDb poster paths from the trusted TMDb image origin, shown only after opening a details dialog.
+
+## On-demand technical media inspection
+
+The **Inspect technical tracks (read-only)** button inside a media detail dialog runs `ffprobe` only for the explicitly selected, already indexed file. It lists real video codec and dimensions, audio codecs, audio languages and channel counts, subtitle codec/language, and duration where the container exposes them. Missing properties remain unknown; audio languages are not inferred from release names. The scan does **not** run during library scans or when opening a detail dialog.
+
+- The Docker media mount stays `/media:ro` and the service runs as an unprivileged user.
+- Only inventory paths confined to the mount are probed. Symlinks and files whose indexed size/mtime changed are rejected for review/rescan.
+- `ffprobe` is bundled in the image (via the `ffmpeg` package), runs with a 25-second timeout and no shell, and output is bounded to 1 MB.
+- The result is returned to the browser on demand; no media writes, torrent actions, or automatic bulk inspection are performed.
+- The technical endpoint is `GET /api/media/{id}/technical`.
