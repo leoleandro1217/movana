@@ -18,6 +18,7 @@ from app.tmdb_languages import ProviderUnavailable, supported_locales, validate_
 from app.tmdb_search import query_candidates, fetch_identity
 from app.search_cache import search_cache_key, CACHE_TTL_HOURS
 from app.tmdb_profile import fetch_profile
+from app.media_probe import ProbeError, inspect_file
 
 MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", "/media")).resolve()
 DB_HOST = os.environ.get("DB_HOST", "db")
@@ -409,6 +410,29 @@ def media_details(media_id: int):
                           expires_at = EXCLUDED.expires_at, cached_at = now()
         """, (media_type, provider_id, lang, Jsonb(profile)))
     return {"media": details, "profile": profile, "confirmed": True, "cached": False}
+
+
+@app.get("/api/media/{media_id}/technical")
+def media_technical(media_id: int):
+    """Explicit on-demand ffprobe inspection. The Docker mount remains read-only."""
+    with connection() as conn:
+        media = conn.execute("""
+            SELECT relative_path, size_bytes, modified_ns FROM media_files WHERE id = %s
+        """, (media_id,)).fetchone()
+    if media is None:
+        raise HTTPException(status_code=404, detail="Media file not found")
+    stored = MEDIA_ROOT / media["relative_path"]
+    try:
+        # Never probe stale, untrusted, escaped or symlinked paths.
+        if stored.is_symlink() or not stored.resolve(strict=True).is_relative_to(MEDIA_ROOT):
+            raise ProbeError("Media path is not a safe regular file")
+        stat = stored.stat()
+        if stat.st_size != media["size_bytes"] or stat.st_mtime_ns != media["modified_ns"]:
+            raise ProbeError("File changed since inventory; scan the library again")
+        inspected = inspect_file(stored)
+    except (OSError, ValueError, ProbeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"technical": inspected, "read_only": True, "cached": False}
 
 
 @app.post("/api/libraries/{library_id}/scan", status_code=202)
