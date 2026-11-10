@@ -117,7 +117,29 @@ async function showDetails(id){
   addText(info,'div','Local file: '+media.relative_path,'path');
   addText(info,'div','Size: '+(media.size_bytes/1073741824).toFixed(2)+' GiB','meta');
   addText(info,'div','Library category: '+(labels[media.category]||media.category),'meta');
-  addText(info,'div','Video/audio codecs and language tracks: not inspected yet.','profile-note');
+  const technical=document.createElement('div');technical.className='profile-note';
+  technical.textContent='Technical tracks: not inspected yet.';
+  const inspect=document.createElement('button');inspect.type='button';inspect.className='secondary';
+  inspect.textContent='Inspect technical tracks (read-only)';
+  inspect.onclick=async()=>{
+    inspect.disabled=true;technical.textContent='Inspecting selected file…';
+    try{
+      const report=await json('/api/media/'+media.id+'/technical');
+      const tech=report.technical;technical.replaceChildren();
+      addText(technical,'div',tech.duration_seconds!==null?'Duration: '+Math.round(tech.duration_seconds)+' sec':'Duration unavailable');
+      for(const [kind,tracks] of [['Video',tech.video],['Audio',tech.audio],['Subtitles',tech.subtitles]]){
+        if(!tracks.length){addText(technical,'div',kind+': none detected');continue}
+        for(const track of tracks){
+          const properties=[track.codec||'unknown codec'];
+          if(kind==='Video' && track.width && track.height)properties.push(track.width+'×'+track.height);
+          if(kind==='Audio' && track.channels)properties.push(track.channels+' channels');
+          if(track.language)properties.push('language '+track.language);
+          addText(technical,'div',kind+': '+properties.join(' · '));
+        }
+      }
+    }catch(err){technical.textContent='Inspection unavailable: '+err.message;inspect.disabled=false}
+  };
+  info.append(inspect);info.append(technical);
   addText(info,'div','Cross-seed: not checked.','profile-note');
   layout.append(info);root.append(layout);
  }catch(err){root.textContent='Could not load details: '+err.message}
