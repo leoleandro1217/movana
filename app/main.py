@@ -15,7 +15,7 @@ from psycopg.rows import dict_row
 
 from app.libraries import TYPES, conflicts, resolve_library_path
 from app.tmdb_languages import ProviderUnavailable, supported_locales, validate_preferences
-from app.tmdb_search import query_candidates
+from app.tmdb_search import query_candidates, fetch_identity
 from app.search_cache import search_cache_key, CACHE_TTL_HOURS
 
 MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", "/media")).resolve()
@@ -71,6 +71,16 @@ def initialize_database():
                 results JSONB NOT NULL,
                 expires_at TIMESTAMPTZ NOT NULL,
                 cached_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS media_identifications (
+                media_file_id BIGINT PRIMARY KEY REFERENCES media_files(id) ON DELETE CASCADE,
+                provider TEXT NOT NULL CHECK (provider = 'tmdb'),
+                media_type TEXT NOT NULL CHECK (media_type IN ('movie','tv')),
+                provider_id INTEGER NOT NULL,
+                original_title TEXT NOT NULL,
+                confirmed_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS ix_media_title ON media_files (lower(title))")
@@ -301,6 +311,44 @@ def metadata_search(title: str, kind: str, year: int | None = None, page: int = 
     return {"items": items, "review_required": True, "cached": False}
 
 
+class ManualIdentityChoice(BaseModel):
+    provider_id: int = Field(gt=0)
+
+
+@app.post("/api/media/{media_id}/identify")
+def confirm_identity(media_id: int, request: ManualIdentityChoice):
+    """Explicit user confirmation only; writes DB metadata, never media files."""
+    with connection() as conn:
+        media = conn.execute(
+            "SELECT id, category FROM media_files WHERE id = %s", (media_id,)
+        ).fetchone()
+    if media is None:
+        raise HTTPException(status_code=404, detail="Media file not found")
+    category = media["category"]
+    media_type = {"movies": "movie", "animation": "movie", "series": "tv"}.get(category)
+    if media_type is None:
+        raise HTTPException(status_code=422, detail="TMDb identification not enabled for this category")
+    try:
+        match = fetch_identity(media_type, request.provider_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ProviderUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    with connection() as conn:
+        result = conn.execute("""
+            INSERT INTO media_identifications (media_file_id, provider, media_type, provider_id, original_title)
+            SELECT id, 'tmdb', %s, %s, %s FROM media_files WHERE id = %s AND category = %s
+            ON CONFLICT (media_file_id) DO UPDATE SET
+                provider = EXCLUDED.provider, media_type = EXCLUDED.media_type,
+                provider_id = EXCLUDED.provider_id, original_title = EXCLUDED.original_title,
+                confirmed_at = now()
+            RETURNING media_file_id, provider, media_type, provider_id, original_title
+        """, (media_type, request.provider_id, match["original_title"], media_id, category)).fetchone()
+    if result is None:
+        raise HTTPException(status_code=409, detail="Media disappeared or changed category")
+    return {"identification": result, "files_modified": False}
+
+
 @app.post("/api/libraries/{library_id}/scan", status_code=202)
 async def scan_library(library_id: int):
     with scan_lock:
@@ -323,15 +371,15 @@ async def scan_all():
 @app.get("/api/media")
 def media(query: str = "", library_id: int | None = None, limit: int = 72, offset: int = 0):
     limit, offset = min(max(limit, 1), 200), max(offset, 0)
-    criteria = ["title ILIKE %s ESCAPE '\\'"]
+    criteria = ["m.title ILIKE %s ESCAPE '\\'"]
     args = ["%" + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"]
     if library_id is not None:
-        criteria.append("library_id = %s")
+        criteria.append("m.library_id = %s")
         args.append(library_id)
     where = "WHERE " + " AND ".join(criteria)
     with connection() as conn:
         rows = conn.execute(
-            f"SELECT id,relative_path,title,category,release_year,size_bytes,library_id FROM media_files {where} ORDER BY title,id LIMIT %s OFFSET %s",
+            f"SELECT m.id,m.relative_path,m.title,m.category,m.release_year,m.size_bytes,m.library_id,\n                   i.provider_id AS confirmed_tmdb_id, i.original_title AS confirmed_original_title\n            FROM media_files m LEFT JOIN media_identifications i ON i.media_file_id = m.id {where} ORDER BY m.title,m.id LIMIT %s OFFSET %s",
             args + [limit, offset]).fetchall()
-        total = conn.execute(f"SELECT count(*) AS count FROM media_files {where}", args).fetchone()["count"]
+        total = conn.execute(f"SELECT count(*) AS count FROM media_files m {where}", args).fetchone()["count"]
     return {"items": rows, "total": total, "limit": limit, "offset": offset}
