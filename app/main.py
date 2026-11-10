@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from psycopg.rows import dict_row
 
 from app.libraries import TYPES, conflicts, resolve_library_path
+from app.tmdb_languages import ProviderUnavailable, supported_locales, validate_preferences
 
 MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", "/media")).resolve()
 DB_HOST = os.environ.get("DB_HOST", "db")
@@ -38,6 +39,9 @@ def initialize_database():
                 name VARCHAR(100) NOT NULL,
                 kind VARCHAR(16) NOT NULL CHECK (kind IN ('movies','series','anime','animation','mixed')),
                 folder TEXT NOT NULL UNIQUE,
+                metadata_provider TEXT NOT NULL DEFAULT 'tmdb',
+                title_language TEXT NOT NULL DEFAULT 'original',
+                title_fallback TEXT NOT NULL DEFAULT 'original',
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """)
@@ -56,6 +60,9 @@ def initialize_database():
         """)
         # In-place additive upgrade from the first alpha.
         conn.execute("ALTER TABLE media_files ADD COLUMN IF NOT EXISTS library_id BIGINT REFERENCES libraries(id)")
+        conn.execute("ALTER TABLE libraries ADD COLUMN IF NOT EXISTS metadata_provider TEXT NOT NULL DEFAULT 'tmdb'")
+        conn.execute("ALTER TABLE libraries ADD COLUMN IF NOT EXISTS title_language TEXT NOT NULL DEFAULT 'original'")
+        conn.execute("ALTER TABLE libraries ADD COLUMN IF NOT EXISTS title_fallback TEXT NOT NULL DEFAULT 'original'")
         conn.execute("CREATE INDEX IF NOT EXISTS ix_media_title ON media_files (lower(title))")
         conn.execute("CREATE INDEX IF NOT EXISTS ix_media_library ON media_files (library_id)")
 
@@ -129,6 +136,25 @@ class LibraryInput(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     kind: str = "movies"
     folder: str = Field(min_length=1, max_length=2000)
+    metadata_provider: str = "tmdb"
+    title_language: str = "original"
+    title_fallback: str = "original"
+
+
+class LibraryPreferences(BaseModel):
+    metadata_provider: str = "tmdb"
+    title_language: str = "original"
+    title_fallback: str = "original"
+
+
+def check_preferences(provider: str, language: str, fallback: str):
+    try:
+        validate_preferences(provider, language, fallback)
+    except ProviderUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
 
 
 @asynccontextmanager
@@ -177,7 +203,7 @@ def status():
 def libraries():
     with connection() as conn:
         rows = conn.execute("""
-            SELECT l.id, l.name, l.kind, l.folder, COUNT(f.id) AS file_count
+            SELECT l.id, l.name, l.kind, l.folder, l.metadata_provider, l.title_language, l.title_fallback, COUNT(f.id) AS file_count
             FROM libraries l LEFT JOIN media_files f ON f.library_id = l.id
             GROUP BY l.id ORDER BY l.id
         """).fetchall()
@@ -189,6 +215,7 @@ def create_library(request: LibraryInput):
     name = request.name.strip()
     if not name or request.kind not in TYPES:
         raise HTTPException(status_code=422, detail="Invalid name or media type")
+    check_preferences(request.metadata_provider, request.title_language, request.title_fallback)
     try:
         folder, _ = resolve_library_path(MEDIA_ROOT, request.folder)
     except (ValueError, OSError) as exc:
@@ -200,10 +227,34 @@ def create_library(request: LibraryInput):
         if conflicts(folder, existing):
             raise HTTPException(status_code=409, detail="Library folders must not overlap")
         result = conn.execute("""
-            INSERT INTO libraries (name, kind, folder) VALUES (%s, %s, %s)
-            RETURNING id, name, kind, folder
-        """, (name, request.kind, folder)).fetchone()
+            INSERT INTO libraries (name, kind, folder, metadata_provider, title_language, title_fallback)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id, name, kind, folder, metadata_provider, title_language, title_fallback
+        """, (name, request.kind, folder, request.metadata_provider, request.title_language, request.title_fallback)).fetchone()
     return result
+
+
+@app.get("/api/providers/tmdb/languages")
+def tmdb_languages():
+    try:
+        locales = supported_locales()
+    except ProviderUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"provider": "tmdb", "languages": ["original"] + locales}
+
+
+@app.patch("/api/libraries/{library_id}/preferences")
+def update_library_preferences(library_id: int, request: LibraryPreferences):
+    check_preferences(request.metadata_provider, request.title_language, request.title_fallback)
+    with connection() as conn:
+        row = conn.execute("""
+            UPDATE libraries SET metadata_provider = %s, title_language = %s, title_fallback = %s
+            WHERE id = %s
+            RETURNING id, metadata_provider, title_language, title_fallback
+        """, (request.metadata_provider, request.title_language, request.title_fallback, library_id)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Library not found")
+    return row
 
 
 @app.post("/api/libraries/{library_id}/scan", status_code=202)
