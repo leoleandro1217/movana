@@ -44,7 +44,7 @@ def _check(files: tuple[ManifestFile, ...], side: str):
         if not isinstance(item, ManifestFile):
             raise ValueError(side + " entries must be ManifestFile")
         path = item.path
-        if not isinstance(path, str) or not path or "\\x00" in path or "\\\\" in path:
+        if not isinstance(path, str) or not path or chr(0) in path or chr(92) in path:
             raise ValueError(side + " has an invalid path")
         p = PurePosixPath(path)
         # Reject traversal, absolute paths, and odd names before matching.
