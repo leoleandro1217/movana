@@ -42,9 +42,9 @@ def query_candidates(title: str, kind: str, year: int | None = None, page: int =
             continue
         if not isinstance(display, str):
             display = orig
-        if not isinstance(date, str) or not re.fullmatch(r"\\d{4}-\\d{2}-\\d{2}", date):
+        if not isinstance(date, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
             date = None
-        if not isinstance(poster, str) or not re.fullmatch(r"/[a-zA-Z0-9_-]+\\.(?:jpg|png|webp)", poster):
+        if not isinstance(poster, str) or not re.fullmatch(r"/[a-zA-Z0-9_-]+\.(?:jpg|png|webp)", poster):
             poster = None
         matches.append({
             "provider": "tmdb",
