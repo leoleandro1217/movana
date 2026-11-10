@@ -65,3 +65,7 @@ The current filter is in `app/crossseed/matching.py`. It never hashes, mutates, 
 - `JobStore`: durable, resumable operations in PostgreSQL.
 
 Only the pure size matching function exists today. The adapter contracts are deliberately deferred until C411 documentation and the qBittorrent deployment have been checked.
+
+## Related research
+
+- [TorrentLinker architecture comparison](research-torrentlinker.md): path mapping, reverse file-layout index, partial-match safeguards, and license considerations.
